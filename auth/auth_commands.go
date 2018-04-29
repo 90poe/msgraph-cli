@@ -1,78 +1,71 @@
 package auth
 
 import (
-	"fmt"
 	"log"
-	"net/url"
-	"os"
-	"os/exec"
-	"runtime"
+	"strconv"
 
+	"github.com/mhoc/msgoraph/client"
+	"github.com/mhoc/msgoraph/scopes"
+	"github.com/mhoc/msgraph-cli/authstate"
 	"github.com/urfave/cli"
 )
 
 func Commands() []cli.Command {
 	return []cli.Command{
 		{
-			Name:   "app-setup",
-			Usage:  "print directions on how to set up an app to speak with the graph api",
-			Action: AppSetup,
-		},
-		{
 			Name:   "login",
 			Usage:  "initiate an oauth2 login with the graph api",
 			Action: Login,
 			Flags: []cli.Flag{
 				cli.StringFlag{
+					Name:  "client-id",
+					Usage: "the client id of the configured msgraph application",
+				},
+				cli.StringFlag{
+					Name:  "client-secret",
+					Usage: "the client secret of the configured msgraph application",
+				},
+				cli.StringFlag{
 					Name:  "port",
 					Usage: "the port to listen to locally for the oauth response",
+				},
+				cli.StringFlag{
+					Name:  "scopes",
+					Usage: "a space-separate list of permissions to ask for during the authorization",
 				},
 			},
 		},
 	}
 }
 
-func AppSetup(c *cli.Context) {
-	fmt.Printf("To set up a new app with the Microsoft Graph API, follow these instructions:\n")
-	fmt.Printf("\thttps://developer.microsoft.com/en-us/graph/docs/concepts/auth_v2_user#1-register-your-app\n")
-	fmt.Printf("After that is set up, provide your application's clientID as an environment variable:\n")
-	fmt.Printf("\tMSGRAPH_CLIENT_ID=6731de76-14a6-49ae-97bc-6eba6914391e\n")
-	fmt.Printf("Finally, execute:\n")
-	fmt.Printf("\tmsgraph auth login\n")
-	fmt.Printf("And sign-in with your Microsoft account authenticated with the information you want to access\n")
-	fmt.Printf("This will create a file at ~/.msgraphcli/auth.json where the token state is stored and used by the cli for future requests\n")
-}
-
 func Login(c *cli.Context) {
-	clientID := os.Getenv("MSGRAPH_CLIENT_ID")
+	clientID := c.String("client-id")
 	if clientID == "" {
-		fmt.Printf("MSGRAPH_CLIENT_ID not provided")
-		os.Exit(1)
+		log.Fatal("-client-id not provided")
 	}
-	port := "8537"
-	if c.String("port") != "" {
-		port = c.String("port")
+	clientSecret := c.String("client-secret")
+	if clientSecret == "" {
+		log.Fatal("-client-secret not provided")
 	}
-	queryString := url.Values{}
-	queryString.Add("client_id", clientID)
-	queryString.Add("redirect_uri", fmt.Sprintf("http://localhost:%v/login", port))
-	queryString.Add("response_mode", "query")
-	queryString.Add("response_type", "code")
-	queryString.Add("scope", "offline_access user.read mail.read")
-	queryString.Add("state", "12345")
-	openURL := fmt.Sprintf("https://login.microsoftonline.com/common/oauth2/v2.0/authorize?%v", queryString.Encode())
-	var err error
-	switch runtime.GOOS {
-	case "darwin":
-		err = exec.Command("open", openURL).Start()
-	case "linux":
-		err = exec.Command("xdg-open", openURL).Start()
-	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", openURL).Start()
-	default:
-		err = fmt.Errorf("unsupported platform")
+	portS := c.String("port")
+	if portS == "" {
+		log.Fatal("-port not provided")
 	}
+	port, err := strconv.Atoi(portS)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err.Error())
+	}
+	scopez := c.String("scopes")
+	if scopez == "" {
+		log.Fatalf("-scopes not provided")
+	}
+	webClient := client.NewWeb(clientID, clientSecret, port, scopes.Resolve(scopez, scopes.PermissionTypeDelegated))
+	err = webClient.InitializeCredentials()
+	if err != nil {
+		panic(err)
+	}
+	err = authstate.Dump(webClient)
+	if err != nil {
+		panic(err)
 	}
 }
